@@ -4,45 +4,42 @@ import { generateGoldberg, PRESETS } from '../geometry/goldberg';
 import { describePolyhedron } from '../geometry/variants';
 import type { GeometryData } from '../geometry/types';
 
-interface GoldbergState {
-  params: GoldbergParams;
-  presetName: string | null;
-  data: GeometryData | null;
-}
-
 export function useGoldberg() {
-  const [state, setState] = useState<GoldbergState>({
-    params: { m: 1, n: 1, radius: 2, variant: 'standard' },
-    presetName: 'C60（富勒烯）',
-    data: null,
-  });
+  const [data, setData] = useState<GeometryData>(() => generateGoldberg({ m: 1, n: 1, radius: 2, variant: 'standard' }));
+  const [params, setParams] = useState<GoldbergParams>({ m: 1, n: 1, radius: 2, variant: 'standard' });
+  const [presetName, setPresetName] = useState<string | null>('C60（富勒烯）');
+  const [renderKey, setRenderKey] = useState(0);
 
   const updateParams = useCallback((partial: Partial<GoldbergParams>) => {
-    setState(prev => {
-      const newParams = { ...prev.params, ...partial };
-      const data = generateGoldberg(newParams);
-      return { params: newParams, presetName: null, data };
+    setParams(prev => {
+      const newParams = { ...prev, ...partial };
+      setData(generateGoldberg(newParams));
+      setPresetName(null);
+      setRenderKey(k => k + 1);
+      return newParams;
     });
   }, []);
 
   const setPreset = useCallback((name: string) => {
     const preset = PRESETS[name];
     if (preset) {
-      const data = generateGoldberg(preset);
-      setState({ params: { ...preset }, presetName: name, data });
+      setPresetName(name);
+      setParams({ ...preset });
+      setData(generateGoldberg(preset));
+      setRenderKey(k => k + 1);
     }
   }, []);
 
   const description = useMemo(() => {
-    if (!state.data) return '';
-    return describePolyhedron(state.params, state.data);
-  }, [state]);
+    return describePolyhedron(params, data);
+  }, [params, data]);
 
   return {
-    params: state.params,
-    presetName: state.presetName,
-    data: state.data,
+    params,
+    presetName,
+    data,
     description,
+    renderKey,
     updateParams,
     setPreset,
   };

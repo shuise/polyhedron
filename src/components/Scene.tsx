@@ -1,10 +1,11 @@
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Grid, Environment } from '@react-three/drei';
 import GoldbergPolyhedron from './GoldbergPolyhedron';
-import type { GoldbergParams } from '../geometry/types';
+import type { GeometryData } from '../geometry/types';
 
 interface Props {
-  params: GoldbergParams;
+  data: GeometryData;
+  renderKey: number;
   color: string;
   opacity: number;
   wireframeColor: string;
@@ -14,7 +15,7 @@ interface Props {
   showAxes: boolean;
 }
 
-export default function Scene({ params, color, opacity, wireframeColor, showEdges, displayMode, showGrid, showAxes }: Props) {
+export default function Scene({ data, renderKey, color, opacity, wireframeColor, showEdges, displayMode, showGrid, showAxes }: Props) {
   return (
     <Canvas
       camera={{ position: [4, 3, 5], fov: 45 }}
@@ -25,7 +26,8 @@ export default function Scene({ params, color, opacity, wireframeColor, showEdge
       <directionalLight position={[-5, 3, -5]} intensity={0.3} />
 
       <GoldbergPolyhedron
-        params={params}
+        key={renderKey}
+        data={data}
         color={color}
         opacity={opacity}
         wireframeColor={wireframeColor}

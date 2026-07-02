@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useControls, folder, button } from 'leva';
 import { BufferGeometry, Float32BufferAttribute } from 'three';
 import Scene from './components/Scene';
@@ -7,7 +7,6 @@ import { exportSTL, exportOBJ, getExportFilename } from './utils/export';
 import type { GoldbergParams, GoldbergVariant } from './geometry/types';
 import { generateGoldberg, PRESETS } from './geometry/goldberg';
 
-/** Map detail level (0-8) to (m, n) pairs for increasing face counts */
 const DETAIL_LEVELS: { m: number; n: number; label: string }[] = [
   { m: 0, n: 1, label: '最小 (32面)' },
   { m: 1, n: 1, label: '简单 (92面)' },
@@ -37,29 +36,34 @@ function geometryFromParams(params: GoldbergParams): BufferGeometry {
 }
 
 export default function App() {
-  const { params, presetName, description, updateParams, setPreset } = useGoldberg();
+  const { params, data, presetName, description, renderKey, updateParams, setPreset } = useGoldberg();
   const presetKeys = Object.keys(PRESETS);
-
-  // Track detail level - -1 means custom (not a preset level)
   const [detailLevel, setDetailLevel] = useState<number>(mnToDetailLevel(params.m, params.n));
 
-  const handleExportSTL = useCallback(() => {
-    const geom = geometryFromParams(params);
-    exportSTL(geom, getExportFilename(params, 'stl'));
-    geom.dispose();
-  }, [params]);
+  // Use ref to avoid stale closure in leva factory
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
 
-  const handleExportOBJ = useCallback(() => {
-    const geom = geometryFromParams(params);
-    exportOBJ(geom, getExportFilename(params, 'obj'));
+  const exportSTLRef = useRef(() => {
+    const p = paramsRef.current;
+    const geom = geometryFromParams(p);
+    exportSTL(geom, getExportFilename(p, 'stl'));
     geom.dispose();
-  }, [params]);
+  });
 
-  const levaValues = useControls({
+  const exportOBJRef = useRef(() => {
+    const p = paramsRef.current;
+    const geom = geometryFromParams(p);
+    exportOBJ(geom, getExportFilename(p, 'obj'));
+    geom.dispose();
+  });
+
+  // Stable leva scheme — factory form with [] deps means it never recreates
+  const [levaValues, setLeva] = useControls(() => ({
     '多面体': folder({
       detailLevel: {
         label: '详细程度',
-        value: detailLevel >= 0 ? detailLevel : DETAIL_LEVELS.length - 1,
+        value: 1,
         min: 0,
         max: DETAIL_LEVELS.length - 1,
         step: 1,
@@ -69,37 +73,26 @@ export default function App() {
           updateParams({ m: level.m, n: level.n });
         },
       },
-      preset: {
-        value: presetName ?? '自定义',
-        options: ['自定义', ...presetKeys],
-        onChange: (val: string) => {
-          if (val !== '自定义') {
-            setPreset(val);
-            const p = PRESETS[val]!;
-            setDetailLevel(mnToDetailLevel(p.m, p.n));
-          }
-        },
-      },
       m: {
-        value: params.m, min: 0, max: 10, step: 1,
+        value: 1, min: 0, max: 10, step: 1,
         onChange: (val: number) => {
           setDetailLevel(-1);
           updateParams({ m: val });
         },
       },
       n: {
-        value: params.n, min: 0, max: 10, step: 1,
+        value: 1, min: 0, max: 10, step: 1,
         onChange: (val: number) => {
           setDetailLevel(-1);
           updateParams({ n: val });
         },
       },
       radius: {
-        label: '半径', value: params.radius, min: 0.5, max: 5, step: 0.1,
+        label: '半径', value: 2, min: 0.5, max: 5, step: 0.1,
         onChange: (val: number) => updateParams({ radius: val }),
       },
       variant: {
-        label: '变体', value: params.variant,
+        label: '变体', value: 'standard',
         options: { '标准': 'standard', '截角': 'truncated', '测地线': 'geodesic' },
         onChange: (val: string) => updateParams({ variant: val as GoldbergVariant }),
       },
@@ -110,7 +103,7 @@ export default function App() {
       wireframeColor: { label: '线框颜色', value: '#222222' },
       showEdges: { label: '显示边缘', value: true },
       displayMode: {
-        label: '显示模式', value: 'solid' as string,
+        label: '显示模式', value: 'solid',
         options: { '实体': 'solid', '线框': 'wireframe', '半透明': 'transparent' },
       },
     }),
@@ -119,10 +112,23 @@ export default function App() {
       showAxes: { label: '显示坐标轴', value: true },
     }),
     '导出': folder({
-      '导出 STL': button(handleExportSTL),
-      '导出 OBJ': button(handleExportOBJ),
+      '导出 STL': button(() => exportSTLRef.current()),
+      '导出 OBJ': button(() => exportOBJRef.current()),
     }),
-  }, [params, presetName, detailLevel, setPreset, updateParams, handleExportSTL, handleExportOBJ]);
+  }), []);
+
+  // Sync leva values when params change from external sources (preset, detailLevel)
+  useEffect(() => {
+    (setLeva as any)({ m: params.m, n: params.n, radius: params.radius, variant: params.variant, detailLevel: Math.max(0, detailLevel) });
+  }, [params, detailLevel]);
+
+  const handlePresetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    if (val === '__custom__') return;
+    setPreset(val);
+    const p = PRESETS[val]!;
+    setDetailLevel(mnToDetailLevel(p.m, p.n));
+  };
 
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
@@ -138,12 +144,35 @@ export default function App() {
         borderRadius: 4,
         fontSize: 13,
         fontFamily: 'monospace',
-        pointerEvents: 'none',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        pointerEvents: 'auto',
       }}>
-        {description}
+        <select
+          value={presetName ?? '__custom__'}
+          onChange={handlePresetChange}
+          style={{
+            background: 'transparent',
+            color: '#fff',
+            border: '1px solid #555',
+            borderRadius: 3,
+            padding: '2px 6px',
+            fontSize: 12,
+            fontFamily: 'monospace',
+            cursor: 'pointer',
+          }}
+        >
+          <option value="__custom__">自定义</option>
+          {presetKeys.map(key => (
+            <option key={key} value={key}>{key}</option>
+          ))}
+        </select>
+        <span>{description}</span>
       </div>
       <Scene
-        params={params}
+        data={data}
+        renderKey={renderKey}
         color={levaValues.color}
         opacity={levaValues.opacity}
         wireframeColor={levaValues.wireframeColor}
